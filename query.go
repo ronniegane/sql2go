@@ -118,13 +118,30 @@ func (sq *SimpleQuery) Select(stmt string, params ... interface{}) *Fetch {
 		}
 
 		rows, err := sq.ormy.db.Query(sq.Stmt)
-		defer rows.Close()
 
 		if err != nil {
 			return err
 		}
 
-		return scan(sq, dest, rows)
+		defer rows.Close()
+
+		return scan(sq, dest, rows, reflect.Struct)
+	}
+
+	fetch.All = func(dest interface{}) error {
+		if fetch.err != nil {
+			return fetch.err
+		}
+
+		rows, err := sq.ormy.db.Query(sq.Stmt)
+
+		if err != nil {
+			return err
+		}
+
+		defer rows.Close()
+
+		return scan(sq, dest, rows, reflect.Slice)
 	}
 
 	return fetch
@@ -133,10 +150,13 @@ func (sq *SimpleQuery) Select(stmt string, params ... interface{}) *Fetch {
 /**
 	Attempt to scan rows into a structs, or arrays of structs
  */
-func scan(sq *SimpleQuery, dest interface{}, rows *sql.Rows) error {
+func scan(sq *SimpleQuery, dest interface{}, rows *sql.Rows, expectedKind reflect.Kind) error {
 	var shadow reflect.Value
 	var value reflect.Value
 	var baseType reflect.Type
+	var fieldMap map[string]int
+	var err error
+	var ptrs []interface{}
 
 	//Get the value
 	value = reflect.ValueOf(dest)
@@ -144,39 +164,53 @@ func scan(sq *SimpleQuery, dest interface{}, rows *sql.Rows) error {
 	//Get pointer to underlying to access type, to determine if it's a slice.
 	ptr := reflect.Indirect(value)
 
-	//TODO make slices work.
+	if ptr.Kind() != expectedKind {
+		return errors.New(fmt.Sprintf("Unexpected pointer kind: %s expected %s", ptr.Kind(), expectedKind))
+	}
+
+	cols, _ := rows.Columns()
+
 	if ptr.Kind() == reflect.Slice {
 		//Use slicer
-		shadow = value.Elem()
-		baseType = reflect.TypeOf(ptr).Elem()
+		baseType = ptr.Type().Elem()
+		shadow = reflect.New(ptr.Type().Elem())
+		shadow = reflect.Indirect(shadow)
+
+		//Get the field to column mapping
+		fieldMap = setOrFind(sq, baseType)
+
+		for rows.Next() {
+			ptrs, err = mapColumnsToStructFields(cols, shadow, fieldMap)
+			err = rows.Scan(ptrs...)
+
+			ptr.Set(reflect.Append(ptr, shadow))
+		}
+
+		return err
 	} else {
 		//Struct
 		shadow = value.Elem()
 		baseType = ptr.Type()
-	}
 
-	//Get the field to column mapping
-	fieldMap := setOrFind(sq, baseType)
+		//Get the field to column mapping
+		fieldMap = setOrFind(sq, baseType)
 
-	cols, _ := rows.Columns()
+		//Scan into the pointers
+		for rows.Next() {
+			ptrs, err = mapColumnsToStructFields(cols, shadow, fieldMap)
 
-	ptrs, err := mapColumnsToStructFields(cols, shadow, fieldMap)
+			err = rows.Scan(ptrs...)
+		}
 
-	if err != nil {
 		return err
 	}
-
-	//Scan into the pointers
-	for rows.Next() {
-		rows.Scan(ptrs...)
-	}
-
-	return nil
 }
 
 func mapColumnsToStructFields(cols []string, shadow reflect.Value, fieldMap map[string]int) ([]interface{}, error) {
 	var ptrs []interface{}
 	ptrs = make([]interface{}, len(cols))
+
+	//fmt.Println(reflect.Indirect(shadow).Kind())
 
 	for i := 0; i < len(cols); i ++ {
 		if _, ok := fieldMap[cols[i]]; ok {
@@ -184,10 +218,10 @@ func mapColumnsToStructFields(cols []string, shadow reflect.Value, fieldMap map[
 
 			ptrs[i] = field.Addr().Interface()
 		} else {
-			return nil, errors.New(fmt.Sprintf("Could not map column to any field: %s", cols[i]))
+			var v string
+			ptrs[i] = &v
 		}
 	}
-
 	return ptrs, nil
 }
 
