@@ -29,6 +29,7 @@ func getDatabase() (*sql.DB, error) {
 
 func TestSimpleFetchOneShouldError(t *testing.T) {
 	var db, _ = getDatabase()
+	setupTable(db)
 
 	v := struct {
 		Col string `db:"col"`
@@ -40,8 +41,14 @@ func TestSimpleFetchOneShouldError(t *testing.T) {
 	log.Print(err)
 }
 
+func setupTable(db *sql.DB) {
+	db.Exec("CREATE TABLE IF NOT EXISTS tmp (col VARCHAR(10))")
+	db.Exec("INSERT INTO tmp (col) VALUES($1) WHERE NOT EXISTS(SELECT * FROM tmp)", "1")
+}
+
 func TestSimpleFetchOneShouldSucceed(t *testing.T) {
 	var db, _ = getDatabase()
+	setupTable(db)
 
 	v := struct {
 		Col  string  `db:"col"`
@@ -58,6 +65,7 @@ func TestSimpleFetchOneShouldSucceed(t *testing.T) {
 
 func TestSimpleFetchAllShouldError(t *testing.T) {
 	var db, _ = getDatabase()
+	setupTable(db)
 
 	v := []struct {
 		Col string `db:"col"`
@@ -75,6 +83,7 @@ func TestSimpleFetchAllShouldError(t *testing.T) {
 
 func TestSimpleFetchAllShouldSucceed(t *testing.T) {
 	var db, _ = getDatabase()
+	setupTable(db)
 
 	v := []struct {
 		Col string `db:"col"`
