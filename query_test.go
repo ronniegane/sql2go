@@ -7,36 +7,46 @@ import (
 	_ "database/sql"
 	"fmt"
 	"database/sql"
+	"log"
+	"os"
 )
 
 type Thing struct {
-	Col   string `db:"col"`
-	Two   string `db:"two"`
+	Col string `db:"col"`
+	Two string `db:"two"`
 }
 
-func TestSimpleFetchOneShouldError(t *testing.T) {
-	var db, _ = sql.Open("postgres", "user=GREX password=QWERTY dbname=postgres sslmode=disable")
+func getDatabase() (*sql.DB, error) {
+	dbName := os.Getenv("CI_DB")
 
-	v := struct {
-		Col   string `db:"col"`
-		Two   string `db:"two"`
-	}{}
-
-	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
-
-	if err == nil {
-		t.Error("Should return an error when fields cannot be mapped")
+	if len(dbName) == 0 {
+		dbName = "postgres"
+		return sql.Open("postgres", "user=GREX password=QWERTY dbname=" + dbName + " sslmode=disable")
+	} else {
+		return sql.Open("postgres", "user=postgres password= dbname=" + dbName + " sslmode=disable")
 	}
 }
 
-
-func TestSimpleFetchOneShouldSucceed(t *testing.T) {
-	var db, _ = sql.Open("postgres", "user=GREX password=QWERTY dbname=postgres sslmode=disable")
+func TestSimpleFetchOneShouldError(t *testing.T) {
+	var db, _ = getDatabase()
 
 	v := struct {
-		Col   string `db:"col"`
-		Two   float32 `db:"two"`
-		Four  int64 `db:"four"`
+		Col string `db:"col"`
+		Two string `db:"two"`
+	}{}
+
+	err := newOrmy(db) .Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
+
+	log.Print(err)
+}
+
+func TestSimpleFetchOneShouldSucceed(t *testing.T) {
+	var db, _ = getDatabase()
+
+	v := struct {
+		Col  string  `db:"col"`
+		Two  float32 `db:"two"`
+		Four int64   `db:"four"`
 	}{}
 
 	err := newOrmy(db).Query.Select("SELECT col, 3 three, 4 four, 2.0 two FROM tmp").One(&v)
@@ -47,11 +57,11 @@ func TestSimpleFetchOneShouldSucceed(t *testing.T) {
 }
 
 func TestSimpleFetchAllShouldError(t *testing.T) {
-	var db, _ = sql.Open("postgres", "user=GREX password=QWERTY dbname=postgres sslmode=disable")
+	var db, _ = getDatabase()
 
 	v := []struct {
-		Col   string `db:"col"`
-		Two   string `db:"two"`
+		Col string `db:"col"`
+		Two string `db:"two"`
 	}{}
 
 	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
@@ -63,18 +73,17 @@ func TestSimpleFetchAllShouldError(t *testing.T) {
 	}
 }
 
-
 func TestSimpleFetchAllShouldSucceed(t *testing.T) {
-	var db, _ = sql.Open("postgres", "user=GREX password=QWERTY dbname=postgres sslmode=disable")
+	var db, _ = getDatabase()
 
 	v := []struct {
-		Col   string `db:"col"`
-		Two   string `db:"two"`
+		Col string `db:"col"`
+		Two string `db:"two"`
 	}{}
 
-	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp  LIMIT 2", "Two").All(&v)
+	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").All(&v)
 
-	fmt.Println(err)
-
-	fmt.Println(v)
+	if err != nil {
+		t.Error("Should not return error, got ", err)
+	}
 }
