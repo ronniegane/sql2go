@@ -36,7 +36,7 @@ func TestSimpleFetchOneShouldError(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := newOrmy(db) .Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
+	err := Connect(db) .Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
 
 	log.Print(err)
 }
@@ -56,7 +56,7 @@ func TestSimpleFetchOneShouldSucceed(t *testing.T) {
 		Four int64   `db:"four"`
 	}{}
 
-	err := newOrmy(db).Query.Select("SELECT col, 3 three, 4 four, 2.0 two FROM tmp").One(&v)
+	err := Connect(db).Query.Select("SELECT col, 3 three, 4 four, 2.0 two FROM tmp").One(&v)
 
 	if err != nil {
 		t.Error("Should not return an error when fields can be mapped")
@@ -72,7 +72,7 @@ func TestSimpleFetchAllShouldError(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
+	err := Connect(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
 
 	fmt.Println(err)
 
@@ -90,7 +90,7 @@ func TestSimpleFetchAllShouldSucceed(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := newOrmy(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").All(&v)
+	err := Connect(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").All(&v)
 
 	if err != nil {
 		t.Error("Should not return error, got ", err)

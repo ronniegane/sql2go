@@ -14,7 +14,7 @@ import (
 var placeholderPresent = regexp.MustCompile(`(\$[0-9])\b`)
 
 //Houses pointer to DB, Query and map of types to their binding functions, includes mutex for concurrent access safety
-type Ormy struct {
+type Sql2go struct {
 	db        *sql.DB
 	Query     *SimpleQuery
 	funcs     map[string]func(interface{}) string
@@ -29,7 +29,7 @@ type Query interface {
 
 //Simply query struct, contains pointer back to parent
 type SimpleQuery struct {
-	ormy *Ormy
+	ormy *Sql2go
 	Stmt string
 	sync.RWMutex
 }
@@ -42,10 +42,10 @@ type Fetch struct {
 }
 
 /**
- Create a new Ormy and binder for primitive parameter binding
+ Create a new Sql2go and binder for primitive parameter binding
  */
-func newOrmy(db *sql.DB) *Ormy {
-	ormy := &Ormy{
+func Connect(db *sql.DB) *Sql2go {
+	ormy := &Sql2go{
 		db:        db,
 		funcs:     make(map[string]func(interface{}) string),
 		structMap: make(map[string]map[string]int),
@@ -61,7 +61,7 @@ func newOrmy(db *sql.DB) *Ormy {
 	return ormy
 }
 
-func (ormy *Ormy) InitialiseBinder() {
+func (ormy *Sql2go) InitialiseBinder() {
 	ormy.RWMutex.Lock()
 
 	var intFunc = func(v interface{}) string {
