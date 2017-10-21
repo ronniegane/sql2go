@@ -1,4 +1,4 @@
-package ormy
+package sql2go
 
 import (
 	"testing"
@@ -21,9 +21,9 @@ func getDatabase() (*sql.DB, error) {
 
 	if len(dbName) == 0 {
 		dbName = "postgres"
-		return sql.Open("postgres", "user=GREX password=QWERTY dbname=" + dbName + " sslmode=disable")
+		return sql.Open("postgres", "user=GREX password=QWERTY dbname="+dbName+" sslmode=disable")
 	} else {
-		return sql.Open("postgres", "user=postgres password= dbname=" + dbName + " sslmode=disable")
+		return sql.Open("postgres", "user=postgres password= dbname="+dbName+" sslmode=disable")
 	}
 }
 
@@ -36,7 +36,9 @@ func TestSimpleFetchOneShouldError(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := Connect(db) .Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
+	err := Connect(db).Query("").FetchOne(&v)
+
+
 
 	log.Print(err)
 }
@@ -56,7 +58,7 @@ func TestSimpleFetchOneShouldSucceed(t *testing.T) {
 		Four int64   `db:"four"`
 	}{}
 
-	err := Connect(db).Query.Select("SELECT col, 3 three, 4 four, 2.0 two FROM tmp").One(&v)
+	err := Connect(db).Query("SELECT col, 3 three, 4 four, 2.0 two FROM tmp").FetchOne(&v)
 
 	if err != nil {
 		t.Error("Should not return an error when fields can be mapped")
@@ -72,7 +74,7 @@ func TestSimpleFetchAllShouldError(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := Connect(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").One(&v)
+	err := Connect(db).Query("SELECT col, 3 three, $1 two FROM tmp", "Two").FetchOne(&v)
 
 	fmt.Println(err)
 
@@ -90,7 +92,7 @@ func TestSimpleFetchAllShouldSucceed(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := Connect(db).Query.Select("SELECT col, 3 three, $1 two FROM tmp", "Two").All(&v)
+	err := Connect(db).Query("SELECT col, 3 three, $1 two FROM tmp", "Two").Fetch(&v)
 
 	if err != nil {
 		t.Error("Should not return error, got ", err)

@@ -1,4 +1,4 @@
-package ormy
+package sql2go
 
 import (
 	"errors"
@@ -16,7 +16,7 @@ var placeholderPresent = regexp.MustCompile(`(\$[0-9])\b`)
 //Houses pointer to DB, Query and map of types to their binding functions, includes mutex for concurrent access safety
 type Sql2go struct {
 	db        *sql.DB
-	Query     *SimpleQuery
+	Query     func(stmt string, params ... interface{}) *SimpleQuery
 	funcs     map[string]func(interface{}) string
 	structMap map[string]map[string]int
 	sync.RWMutex
@@ -29,40 +29,69 @@ type Query interface {
 
 //Simply query struct, contains pointer back to parent
 type SimpleQuery struct {
-	ormy *Sql2go
-	Stmt string
+	sql2go   *Sql2go
+	FetchOne func(v interface{}) error
+	Fetch    func(v interface{}) error
+	Stmt     string
+	err      error
 	sync.RWMutex
-}
-
-//Fetchable, houses One and All (TODO) functions
-type Fetch struct {
-	err error
-	One func(v interface{}) error
-	All func(v interface{}) error
 }
 
 /**
  Create a new Sql2go and binder for primitive parameter binding
  */
 func Connect(db *sql.DB) *Sql2go {
-	ormy := &Sql2go{
+	sql2go := &Sql2go{
 		db:        db,
 		funcs:     make(map[string]func(interface{}) string),
 		structMap: make(map[string]map[string]int),
 	}
 
-	ormy.Query = &SimpleQuery{
-		Stmt: "",
-		ormy: ormy,
+	sql2go.Query = func(stmt string, params ... interface{}) *SimpleQuery {
+		var rows *sql.Rows
+
+		q := &SimpleQuery{
+			Stmt:   stmt,
+			sql2go: sql2go,
+		}
+
+		q.err = bindParameters(q, params)
+
+		if q.err != nil {
+			return q
+		}
+
+		if placeholderPresent.MatchString(q.Stmt) {
+			q.err = errors.New("not enough parameters")
+			return q
+		}
+
+		q.FetchOne = func(dest interface{}) error {
+			rows, q.err = q.sql2go.db.Query(q.Stmt)
+
+			defer rows.Close()
+
+			return scan(q, dest, rows, reflect.Struct)
+		}
+
+		q.Fetch = func(dest interface{}) error {
+			rows, q.err = q.sql2go.db.Query(q.Stmt)
+
+			defer rows.Close()
+
+			return scan(q, dest, rows, reflect.Slice)
+		}
+
+		return q
 	}
 
-	ormy.InitialiseBinder()
+	sql2go.InitialiseBinder()
 
-	return ormy
+	return sql2go
 }
 
-func (ormy *Sql2go) InitialiseBinder() {
-	ormy.RWMutex.Lock()
+func (sql2go *Sql2go) InitialiseBinder() {
+	sql2go.RWMutex.Lock()
 
 	var intFunc = func(v interface{}) string {
 		return fmt.Sprintf("%d", v)
@@ -73,78 +102,32 @@ func (ormy *Sql2go) InitialiseBinder() {
 	}
 
 	//Strings
-	ormy.funcs["string"] = func(v interface{}) string {
+	sql2go.funcs["string"] = func(v interface{}) string {
 		return fmt.Sprintf("'%s'", v)
 	}
 
 	//Integers
-	ormy.funcs["int"] = intFunc
-	ormy.funcs["int"] = intFunc
-	ormy.funcs["int8"] = intFunc
-	ormy.funcs["int16"] = intFunc
-	ormy.funcs["int32"] = intFunc
-	ormy.funcs["int64"] = intFunc
-	ormy.funcs["uint"] = intFunc
-	ormy.funcs["uint8"] = intFunc
-	ormy.funcs["uint16"] = intFunc
-	ormy.funcs["uint32"] = intFunc
-	ormy.funcs["uint64"] = intFunc
+	sql2go.funcs["int"] = intFunc
+	sql2go.funcs["int"] = intFunc
+	sql2go.funcs["int8"] = intFunc
+	sql2go.funcs["int16"] = intFunc
+	sql2go.funcs["int32"] = intFunc
+	sql2go.funcs["int64"] = intFunc
+	sql2go.funcs["uint"] = intFunc
+	sql2go.funcs["uint8"] = intFunc
+	sql2go.funcs["uint16"] = intFunc
+	sql2go.funcs["uint32"] = intFunc
+	sql2go.funcs["uint64"] = intFunc
 
 	//Floats
-	ormy.funcs["float32"] = floatFunc
-	ormy.funcs["float64"] = floatFunc
+	sql2go.funcs["float32"] = floatFunc
+	sql2go.funcs["float64"] = floatFunc
 
-	ormy.funcs["bool"] = func(v interface{}) string {
+	sql2go.funcs["bool"] = func(v interface{}) string {
 		return fmt.Sprintf("%t", v)
 	}
 
-	ormy.RWMutex.Unlock()
-}
-
-func (sq *SimpleQuery) Select(stmt string, params ... interface{}) *Fetch {
-	sq.Stmt = stmt
-
-	//Bind parameters and create a fetch struct
-	fetch := bindParameters(sq, params)
-
-	if placeholderPresent.MatchString(sq.Stmt) {
-		fetch.err = errors.New("not enough parameters")
-	}
-
-	//Fetch one row
-	fetch.One = func(dest interface{}) error {
-		if fetch.err != nil {
-			return fetch.err
-		}
-
-		rows, err := sq.ormy.db.Query(sq.Stmt)
-
-		if err != nil {
-			return err
-		}
-
-		defer rows.Close()
-
-		return scan(sq, dest, rows, reflect.Struct)
-	}
-
-	fetch.All = func(dest interface{}) error {
-		if fetch.err != nil {
-			return fetch.err
-		}
-
-		rows, err := sq.ormy.db.Query(sq.Stmt)
-
-		if err != nil {
-			return err
-		}
-
-		defer rows.Close()
-
-		return scan(sq, dest, rows, reflect.Slice)
-	}
-
-	return fetch
+	sql2go.RWMutex.Unlock()
 }
 
 /**
@@ -228,17 +211,17 @@ func mapColumnsToStructFields(cols []string, shadow reflect.Value, fieldMap map[
 func setOrFind(sq *SimpleQuery, typ reflect.Type) map[string]int {
 	cache := true
 
-	sq.ormy.RLock()
+	sq.sql2go.RLock()
 
 	//Determine if we should cache the struct fields
-	if _, ok := sq.ormy.structMap[typ.Name()]; ok {
+	if _, ok := sq.sql2go.structMap[typ.Name()]; ok {
 		cache = true
 	}
 
-	sq.ormy.RUnlock()
+	sq.sql2go.RUnlock()
 
 	if cache {
-		sq.ormy.Lock()
+		sq.sql2go.Lock()
 
 		var fieldMap map[string]int
 		fieldMap = make(map[string]int, typ.NumField())
@@ -255,27 +238,23 @@ func setOrFind(sq *SimpleQuery, typ reflect.Type) map[string]int {
 			}
 		}
 
-		sq.ormy.structMap[typ.Name()] = fieldMap
+		sq.sql2go.structMap[typ.Name()] = fieldMap
 
-		sq.ormy.Unlock()
+		sq.sql2go.Unlock()
 	}
 
-	return sq.ormy.structMap[typ.Name()]
+	return sq.sql2go.structMap[typ.Name()]
 }
 
-func bindParameters(sq *SimpleQuery, params []interface{}) *Fetch {
+func bindParameters(sq *SimpleQuery, params []interface{}) error {
 	var err error
-
-	fetch := &Fetch{
-		err: nil,
-	}
 
 	if len(params) > 0 {
 		for i, v := range params {
 			rgx := regexp.MustCompile(`(\$` + strconv.Itoa(i+1) + `)\b`)
 
 			if !rgx.MatchString(sq.Stmt) {
-				fetch.err = errors.New("error in ordinal binding, could not replace parameter : $" + strconv.Itoa(i+1))
+				err = errors.New("error in ordinal binding, could not replace parameter : $" + strconv.Itoa(i+1))
 				break
 			}
 
@@ -283,17 +262,14 @@ func bindParameters(sq *SimpleQuery, params []interface{}) *Fetch {
 			err = sq.CheckTypeAndBind(v, i, rgx)
 
 			if err != nil {
-				fetch.err = err
+				return err
 				break
 			}
 		}
 	}
 
-	fetch.err = err
-
-	return fetch
+	return err
 }
-
 
 func (sq *SimpleQuery) CheckTypeAndBind(value interface{}, ind int, rgx *regexp.Regexp) error {
 	t := reflect.TypeOf(value)
@@ -301,7 +277,7 @@ func (sq *SimpleQuery) CheckTypeAndBind(value interface{}, ind int, rgx *regexp.
 		var f func(interface{}) string
 
 		sq.RLock()
-		f = sq.ormy.funcs[t.Name()]
+		f = sq.sql2go.funcs[t.Name()]
 		sq.RUnlock()
 
 		return f
