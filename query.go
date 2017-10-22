@@ -8,6 +8,7 @@ import (
 	"sync"
 	"database/sql"
 	"strconv"
+	"strings"
 )
 
 //Used to check if there are unbound parameters following bind loop
@@ -22,16 +23,12 @@ type Sql2go struct {
 	sync.RWMutex
 }
 
-// Contract for query structs
-type Query interface {
-	Select(stmt string) error
-}
-
 //Simply query struct, contains pointer back to parent
 type SimpleQuery struct {
 	sql2go   *Sql2go
-	FetchOne func(v interface{}) error
-	Fetch    func(v interface{}) error
+	FetchOne func(interface{}) error
+	Fetch    func(interface{}) error
+	AddParameter func(string, interface{}) *SimpleQuery
 	Stmt     string
 	err      error
 	sync.RWMutex
@@ -58,6 +55,15 @@ func Connect(db *sql.DB) *Sql2go {
 		q.err = bindParameters(q, params)
 
 		if q.err != nil {
+			return q
+		}
+
+		q.AddParameter = func(pName string, value interface{}) *SimpleQuery {
+			typ := reflect.TypeOf(value)
+			fn := q.sql2go.funcs[typ.Name()]
+
+			q.Stmt = strings.Replace(q.Stmt, ":" + pName, fn(value), -1)
+
 			return q
 		}
 
@@ -192,8 +198,6 @@ func scan(sq *SimpleQuery, dest interface{}, rows *sql.Rows, expectedKind reflec
 func mapColumnsToStructFields(cols []string, shadow reflect.Value, fieldMap map[string]int) ([]interface{}, error) {
 	var ptrs []interface{}
 	ptrs = make([]interface{}, len(cols))
-
-	//fmt.Println(reflect.Indirect(shadow).Kind())
 
 	for i := 0; i < len(cols); i ++ {
 		if _, ok := fieldMap[cols[i]]; ok {

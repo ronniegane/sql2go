@@ -38,8 +38,6 @@ func TestSimpleFetchOneShouldError(t *testing.T) {
 
 	err := Connect(db).Query("").FetchOne(&v)
 
-
-
 	log.Print(err)
 }
 
@@ -96,5 +94,25 @@ func TestSimpleFetchAllShouldSucceed(t *testing.T) {
 
 	if err != nil {
 		t.Error("Should not return error, got ", err)
+	}
+}
+
+
+func TestAddParameterSucceed(t *testing.T) {
+	var db, _ = getDatabase()
+	setupTable(db)
+
+	v := struct {
+		Col  string  `db:"col"`
+		Two  float32 `db:"two"`
+		Four int64   `db:"four"`
+	}{}
+
+	q := Connect(db).Query("SELECT col, 3 three, 4 four, :param two FROM tmp").AddParameter("param", 2.02)
+
+	err :=  q.FetchOne(&v)
+
+	if err != nil {
+		t.Error("Should not return an error parameter should be mapped")
 	}
 }
