@@ -8,11 +8,10 @@ import (
 	"sync"
 	"database/sql"
 	"strconv"
-	"strings"
 )
 
 //Used to check if there are unbound parameters following bind loop
-var placeholderPresent = regexp.MustCompile(`(\$[0-9])\b`)
+var placeholderPresent = regexp.MustCompile(`(\$[0-9])\b | (:[a-z])\b`)
 
 //Houses pointer to DB, Query and map of types to their binding functions, includes mutex for concurrent access safety
 type Sql2go struct {
@@ -26,11 +25,24 @@ type Sql2go struct {
 //Simply query struct, contains pointer back to parent
 type SimpleQuery struct {
 	sql2go   *Sql2go
+	//Fetches a row into a struct
 	FetchOne func(interface{}) error
+
+	//Fetches one or more rows into a slice
 	Fetch    func(interface{}) error
+
+	//Binds a parameter to a the Stmt
 	AddParameter func(string, interface{}) *SimpleQuery
+
+	//Update or Insert, wraps the standard library Exec
+	Exec	 func() (sql.Result, error)
+
+	//A SQL statement
 	Stmt     string
+
+	//For storing errors
 	err      error
+
 	sync.RWMutex
 }
 
@@ -38,18 +50,21 @@ type SimpleQuery struct {
  Create a new Sql2go and binder for primitive parameter binding
  */
 func Connect(db *sql.DB) *Sql2go {
-	sql2go := &Sql2go{
+	ref := &Sql2go{
 		db:        db,
 		funcs:     make(map[string]func(interface{}) string),
 		structMap: make(map[string]map[string]int),
 	}
 
-	sql2go.Query = func(stmt string, params ... interface{}) *SimpleQuery {
+	ref.InitialiseBinder()
+
+	ref.Query = func(stmt string, params ... interface{}) *SimpleQuery {
 		var rows *sql.Rows
+		var result sql.Result
 
 		q := &SimpleQuery{
 			Stmt:   stmt,
-			sql2go: sql2go,
+			sql2go: ref,
 		}
 
 		q.err = bindParameters(q, params)
@@ -59,10 +74,14 @@ func Connect(db *sql.DB) *Sql2go {
 		}
 
 		q.AddParameter = func(pName string, value interface{}) *SimpleQuery {
-			typ := reflect.TypeOf(value)
-			fn := q.sql2go.funcs[typ.Name()]
+			rgx := regexp.MustCompile(`(\:` + pName + `)\b`)
 
-			q.Stmt = strings.Replace(q.Stmt, ":" + pName, fn(value), -1)
+			if !rgx.MatchString(q.Stmt) {
+				q.err = errors.New("error in named binding, could not replace parameter : " + pName)
+			}
+
+			//Check type and bind
+			q.err = q.CheckTypeAndBind(value, rgx)
 
 			return q
 		}
@@ -88,13 +107,19 @@ func Connect(db *sql.DB) *Sql2go {
 			return scan(q, dest, rows, reflect.Slice)
 		}
 
+		q.Exec = func() (sql.Result, error) {
+			result, q.err = q.sql2go.db.Exec(q.Stmt)
+
+			return result, q.err
+		}
+
 		return q
 	}
 
-	sql2go.InitialiseBinder()
-
-	return sql2go
+	return ref
 }
+
+
 
 func (sql2go *Sql2go) InitialiseBinder() {
 	sql2go.RWMutex.Lock()
@@ -219,7 +244,7 @@ func setOrFind(sq *SimpleQuery, typ reflect.Type) map[string]int {
 
 	//Determine if we should cache the struct fields
 	if _, ok := sq.sql2go.structMap[typ.Name()]; ok {
-		cache = true
+		cache = false
 	}
 
 	sq.sql2go.RUnlock()
@@ -263,7 +288,7 @@ func bindParameters(sq *SimpleQuery, params []interface{}) error {
 			}
 
 			//Check type and bind
-			err = sq.CheckTypeAndBind(v, i, rgx)
+			err = sq.CheckTypeAndBind(v, rgx)
 
 			if err != nil {
 				return err
@@ -275,7 +300,7 @@ func bindParameters(sq *SimpleQuery, params []interface{}) error {
 	return err
 }
 
-func (sq *SimpleQuery) CheckTypeAndBind(value interface{}, ind int, rgx *regexp.Regexp) error {
+func (sq *SimpleQuery) CheckTypeAndBind(value interface{}, rgx *regexp.Regexp) error {
 	t := reflect.TypeOf(value)
 	f := (func() func(interface{}) string {
 		var f func(interface{}) string

@@ -5,10 +5,9 @@ import (
 	_ "github.com/lib/pq"
 	_ "fmt"
 	_ "database/sql"
-	"fmt"
 	"database/sql"
-	"log"
 	"os"
+	"fmt"
 )
 
 type Thing struct {
@@ -36,9 +35,7 @@ func TestSimpleFetchOneShouldError(t *testing.T) {
 		Two string `db:"two"`
 	}{}
 
-	err := Connect(db).Query("").FetchOne(&v)
-
-	log.Print(err)
+	Connect(db).Query("").FetchOne(&v)
 }
 
 func setupTable(db *sql.DB) {
@@ -74,8 +71,6 @@ func TestSimpleFetchAllShouldError(t *testing.T) {
 
 	err := Connect(db).Query("SELECT col, 3 three, $1 two FROM tmp", "Two").FetchOne(&v)
 
-	fmt.Println(err)
-
 	if err == nil {
 		t.Error("Should return an error when fields cannot be mapped")
 	}
@@ -108,11 +103,54 @@ func TestAddParameterSucceed(t *testing.T) {
 		Four int64   `db:"four"`
 	}{}
 
-	q := Connect(db).Query("SELECT col, 3 three, 4 four, :param two FROM tmp").AddParameter("param", 2.02)
+	ref := Connect(db)
 
-	err :=  q.FetchOne(&v)
+	q := ref.Query("SELECT col, 3 three, 4 four, :param two FROM tmp").AddParameter("param", 2.02)
+
+	err := q.FetchOne(&v)
+
+	q = ref.Query("SELECT col, 3 three, 4 four, :param two FROM tmp").AddParameter("param", 2.03)
+
+	err = q.FetchOne(&v)
 
 	if err != nil {
 		t.Error("Should not return an error parameter should be mapped")
 	}
+}
+
+
+
+func TestNotEnoughParameters(t *testing.T) {
+	ref := Connect(nil)
+
+	q := ref.Query("SELECT col, 3 three, :param2 four, :param two FROM tmp").AddParameter("param", 2.02)
+
+	if q.err == nil {
+		t.Error("Should fail when there are unbound parameters")
+	}
+}
+
+func TestExec(t *testing.T){
+	var db, _ = getDatabase()
+	setupTable(db)
+
+	_, err := Connect(db).Query("INSERT INTO tmp (col) VALUES($1)", "MAUI").Exec()
+
+	if err != nil {
+		t.Error("Should not error on insert")
+	}
+}
+
+func BenchmarkParameterBind(b *testing.B){
+	ref := Connect(nil)
+	q := ref.Query("SELECT col, 3 three, 4 four, :param two FROM tmp")
+
+	b.ResetTimer()
+
+	//for n := 0; n < b.N; n++ {
+		q = ref.Query("SELECT col, :param three, 4 four, :param2 two FROM tmp")
+		q.AddParameter("param", 1)
+
+		fmt.Println(q.Stmt, q.err)
+	//}
 }
