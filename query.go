@@ -11,7 +11,7 @@ import (
 )
 
 //Used to check if there are unbound parameters following bind loop
-var placeholderPresent = regexp.MustCompile(`(\$[0-9])\b | (:[a-z])\b`)
+var placeholderPresent = regexp.MustCompile(`(\$[0-9]+)\b|(:[a-z][a-zA-Z0-9]+)\b`)
 
 //Houses pointer to DB, Query and map of types to their binding functions, includes mutex for concurrent access safety
 type Sql2go struct {
